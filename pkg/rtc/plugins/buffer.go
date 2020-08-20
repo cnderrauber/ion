@@ -84,6 +84,7 @@ type Buffer struct {
 	rtpExtInfoChan chan rtpExtInfo
 	// lastTCCSN      uint16
 	// bufferStartTS time.Time
+	tccOn bool
 }
 
 type BufferOptions struct {
@@ -96,6 +97,7 @@ func NewBuffer(o BufferOptions) *Buffer {
 	b := &Buffer{
 		rtcpCh:         make(chan rtcp.Packet, maxPktSize),
 		rtpExtInfoChan: make(chan rtpExtInfo, maxPktSize),
+		tccOn:          o.TCCOn,
 	}
 
 	if o.TCCOn {
@@ -259,24 +261,26 @@ func (b *Buffer) Push(p *rtp.Packet) {
 	b.pktBuffer[p.SequenceNumber] = p
 	b.lastPushSN = p.SequenceNumber
 
-	//store arrival time
-	timestampUs := time.Now().UnixNano() / 1000
-	rtpTCC := rtp.TransportCCExtension{}
-	err := rtpTCC.Unmarshal(p.GetExtension(tccExtMapID))
-	if err == nil {
-		// if time.Now().Sub(b.bufferStartTS) > time.Second {
+	if b.tccOn {
+		//store arrival time
+		timestampUs := time.Now().UnixNano() / 1000
+		rtpTCC := rtp.TransportCCExtension{}
+		err := rtpTCC.Unmarshal(p.GetExtension(tccExtMapID))
+		if err == nil {
+			// if time.Now().Sub(b.bufferStartTS) > time.Second {
 
-		//only calc the packet which rtpTCC.TransportSequence > b.lastTCCSN
-		//https://webrtc.googlesource.com/src/webrtc/+/f54860e9ef0b68e182a01edc994626d21961bc4b/modules/rtp_rtcp/source/rtcp_packet/transport_feedback.cc#353
-		// if rtpTCC.TransportSequence > b.lastTCCSN {
-		b.rtpExtInfoChan <- rtpExtInfo{
-			TSN:       rtpTCC.TransportSequence,
-			Timestamp: timestampUs,
+			//only calc the packet which rtpTCC.TransportSequence > b.lastTCCSN
+			//https://webrtc.googlesource.com/src/webrtc/+/f54860e9ef0b68e182a01edc994626d21961bc4b/modules/rtp_rtcp/source/rtcp_packet/transport_feedback.cc#353
+			// if rtpTCC.TransportSequence > b.lastTCCSN {
+			b.rtpExtInfoChan <- rtpExtInfo{
+				TSN:       rtpTCC.TransportSequence,
+				Timestamp: timestampUs,
+			}
+			// b.lastTCCSN = rtpTCC.TransportSequence
+			// }
 		}
-		// b.lastTCCSN = rtpTCC.TransportSequence
 		// }
 	}
-	// }
 
 	// clear old packet by timestamp
 	b.clearOldPkt(p.Timestamp, p.SequenceNumber)
